@@ -658,27 +658,30 @@ class Engine(EngineScoreMixin, EngineBase):
         Optional[SubprocessWatchdog],
     ]:
         """Launch the TokenizerManager in the main process, the Scheduler in a subprocess, and the DetokenizerManager in another subprocess.
+        启动三个核心组件：
+          - Scheduler（子进程）: 调度 batch、调用 GPU 推理
+          - DetokenizerManager（子进程）: 反分词
+          - TokenizerManager（主进程）: 分词、管理请求状态
 
         Returns:
             Tuple of (tokenizer_manager, template_manager, port_args, scheduler_init_result, subprocess_watchdog).
         """
-        # Configure global environment
+        # 1. 全局环境初始化
         configure_logger(server_args)
         _set_envs_and_config(server_args)
 
-        # Defensive: ensure plugins loaded (may already be loaded by
-        # Engine.__init__ or CLI entry).
+        # 再次确保插件已加载（可能在 Engine.__init__ 或 CLI 入口已加载）
         load_plugins()
 
         server_args.check_server_args()
         _set_gc(server_args)
 
-        # Allocate ports for inter-process communications
+        # 2. 分配 ZMQ IPC 通信端口（每个进程用不同的 IPC 地址）
         if port_args is None:
             port_args = PortArgs.init_new(server_args)
         logger.info(f"{server_args=}")
 
-        # Start the engine info bootstrap server if per-rank info is needed.
+        # 可选：启动 EngineInfoBootstrapServer（用于跨节点权重传输）
         engine_info_bootstrap_server = None
         if (
             server_args.remote_instance_weight_loader_start_seed_via_transfer_engine
@@ -695,7 +698,7 @@ class Engine(EngineScoreMixin, EngineBase):
                 host=server_args.host, port=bootstrap_port
             )
 
-        # Launch scheduler processes
+        # 3. 启动 Scheduler 进程（TP 并行时启动多个，每个负责一块 GPU）
         scheduler_init_result, scheduler_procs = cls._launch_scheduler_processes(
             server_args, port_args, run_scheduler_process_func
         )
@@ -703,19 +706,21 @@ class Engine(EngineScoreMixin, EngineBase):
             engine_info_bootstrap_server
         )
 
+        # 可选：启动弹性专家备份管理器（用于 MoE 模型的热备）
         if (
             server_args.enable_elastic_expert_backup
             and server_args.elastic_ep_backend is not None
         ):
             run_expert_backup_manager(server_args, port_args)
 
+        # 4. 多机部署时的非 0 号节点分支
         if server_args.node_rank >= 1:
-            # In multi-node cases, non-zero rank nodes do not need to run tokenizer or detokenizer,
-            # so they can just wait here.
+            # 非 rank 0 的节点不需要运行 tokenizer/detokenizer
+            # 它们只运行 Scheduler，等待主节点发来工作
             scheduler_init_result.wait_for_ready()
 
             if os.getenv("SGLANG_BLOCK_NONZERO_RANK_CHILDREN") == "0":
-                # When using `Engine` as a Python API, we don't want to block here.
+                # 作为 Python API 使用时不需要阻塞在这里
                 return (
                     None,
                     None,
@@ -737,7 +742,7 @@ class Engine(EngineScoreMixin, EngineBase):
                 None,
             )
 
-        # Launch detokenizer process
+        # 5. 启动 DetokenizerManager 进程（负责反分词：token_ids → text）
         detoken_proc = mp.Process(
             target=run_detokenizer_process_func,
             args=(
@@ -748,26 +753,28 @@ class Engine(EngineScoreMixin, EngineBase):
         detoken_proc.start()
         scheduler_init_result.all_child_pids.append(detoken_proc.pid)
 
-        # Init tokenizer manager first, as the bootstrap server is initialized here
+        # 6. 初始化 TokenizerManager（在主进程中运行）
+        #     它负责：接收 HTTP 请求、分词、通过 ZMQ 发给 Scheduler、
+        #           从 DetokenizerManager 接收结果并返回给客户端
         if server_args.tokenizer_worker_num == 1:
             tokenizer_manager, template_manager = init_tokenizer_manager_func(
                 server_args, port_args
             )
         else:
-            # Launch multi-tokenizer router
+            # 多 Tokenizer 进程模式（高并发场景）
             tokenizer_manager = MultiTokenizerRouter(server_args, port_args)
             template_manager = None
 
-        # Wait for the model to finish loading
+        # 7. 等待 Scheduler 完成模型加载
         scheduler_init_result.wait_for_ready()
 
-        # Get back some info from scheduler to tokenizer_manager
+        # 从 Scheduler 获取一些信息回传给 TokenizerManager
         tokenizer_manager.max_req_input_len = scheduler_init_result.scheduler_infos[0][
             "max_req_input_len"
         ]
 
-        # Set up subprocess liveness watchdog to detect crashes
-        # Note: RayEngine returns scheduler_procs=None as it uses Ray actors instead of mp.Process
+        # 8. 启动子进程存活检测 watchdog
+        #     定期检查子进程是否存活，崩溃时触发 SIGQUIT 执行诊断
         processes = list(scheduler_procs or [])
         names = [f"scheduler_{i}" for i in range(len(processes))]
         processes.append(detoken_proc)
@@ -778,11 +785,11 @@ class Engine(EngineScoreMixin, EngineBase):
         subprocess_watchdog.start()
 
         return (
-            tokenizer_manager,
-            template_manager,
-            port_args,
-            scheduler_init_result,
-            subprocess_watchdog,
+            tokenizer_manager,       # 主进程，实际处理请求
+            template_manager,        # 对话模板管理
+            port_args,               # IPC 端口信息
+            scheduler_init_result,   # Scheduler 初始化结果（含模型信息）
+            subprocess_watchdog,     # 子进程监控器
         )
 
     def shutdown(self):

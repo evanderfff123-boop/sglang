@@ -13,8 +13,10 @@
 # ==============================================================================
 """
 The entry point of inference server. (SRT = SGLang Runtime)
+推理服务器 HTTP 入口。
 
 This file implements HTTP APIs for the inference engine via fastapi.
+实现了基于 FastAPI 的 HTTP API，作为 SGLang 推理引擎的对外接口。
 """
 
 import asyncio
@@ -187,6 +189,7 @@ WAIT_WEIGHTS_READY_TIMEOUT = int(os.getenv("SGLANG_WAIT_WEIGHTS_READY_TIMEOUT", 
 
 
 # Store global states
+# 存储全局状态：tokenizer_manager、template_manager、scheduler_info
 @dataclasses.dataclass
 class _GlobalState:
     tokenizer_manager: Union[TokenizerManager, MultiTokenizerRouter, TokenizerWorker]
@@ -500,7 +503,7 @@ async def validate_json_request(raw_request: Request):
         )
 
 
-##### Native API endpoints #####
+##### Native API endpoints / 原生推理 API #####
 
 
 @app.get("/health")
@@ -704,7 +707,7 @@ if os.environ.get("DUMPER_SERVER_PORT") == "reuse":
     response_class=SGLangORJSONResponse,
 )
 async def generate_request(obj: GenerateReqInput, request: Request):
-    """Handle a generate request."""
+    """Handle a generate request. / 处理生成请求（文本补全/对话）。"""
     if obj.stream:
 
         async def stream_results() -> AsyncIterator[bytes]:
@@ -737,7 +740,7 @@ async def generate_request(obj: GenerateReqInput, request: Request):
 
 @app.api_route("/encode", methods=["POST", "PUT"])
 async def encode_request(obj: EmbeddingReqInput, request: Request):
-    """Handle an embedding request."""
+    """Handle an embedding request. / 处理 embedding 向量化请求。"""
     try:
         ret = await _global_state.tokenizer_manager.generate_request(
             obj, request
@@ -749,7 +752,7 @@ async def encode_request(obj: EmbeddingReqInput, request: Request):
 
 @app.api_route("/classify", methods=["POST", "PUT"])
 async def classify_request(obj: EmbeddingReqInput, request: Request):
-    """Handle a reward model request. Now the arguments and return values are the same as embedding models."""
+    """Handle a reward model request. Now the arguments and return values are the same as embedding models. / 处理 Reward Model 请求。"""
     try:
         ret = await _global_state.tokenizer_manager.generate_request(
             obj, request
@@ -1478,12 +1481,12 @@ async def continue_generation(obj: ContinueGenerationReqInput, request: Request)
     )
 
 
-##### OpenAI-compatible API endpoints #####
+##### OpenAI-compatible API endpoints / OpenAI 兼容 API #####
 
 
 @app.post("/v1/completions", dependencies=[Depends(validate_json_request)])
 async def openai_v1_completions(request: CompletionRequest, raw_request: Request):
-    """OpenAI-compatible text completion endpoint."""
+    """OpenAI-compatible text completion endpoint. / 文本补全接口。"""
     return await raw_request.app.state.openai_serving_completion.handle_request(
         request, raw_request
     )
@@ -1493,7 +1496,7 @@ async def openai_v1_completions(request: CompletionRequest, raw_request: Request
 async def openai_v1_chat_completions(
     request: ChatCompletionRequest, raw_request: Request
 ):
-    """OpenAI-compatible chat completion endpoint."""
+    """OpenAI-compatible chat completion endpoint. / 对话生成接口（最常用的入口）。"""
     return await raw_request.app.state.openai_serving_chat.handle_request(
         request, raw_request
     )
@@ -2020,17 +2023,23 @@ def _wait_and_warmup(
     launch_callback: Optional[Callable[[], None]] = None,
     execute_warmup_func: Callable = _execute_server_warmup,
 ):
+    """
+    服务启动后的预热流程：
+    1. 等待模型权重加载完成（如果启用 checkpoint engine）
+    2. 发送一个 dummy 请求跑一次推理，触发 CUDA kernel 编译和显存分配
+    3. 标记服务状态为 Up，开始接受真实请求
+    """
     if server_args.checkpoint_engine_wait_weights_before_ready:
         _wait_weights_ready()
 
-    # Send a warmup request
+    # Send a warmup request / 发送一个预热请求触发 CUDA kernel 编译
     if not server_args.skip_server_warmup:
         if not execute_warmup_func(server_args):
             return
     else:
         _global_state.tokenizer_manager.server_status = ServerStatus.Up
 
-    # The server is ready for requests
+    # The server is ready for requests / 服务就绪
     logger.info("The server is fired up and ready to roll!")
 
     if server_args.delete_ckpt_after_loading:
@@ -2124,8 +2133,9 @@ def _setup_and_run_http_server(
     """Set up global state, configure middleware, and run uvicorn.
 
     Called by launch_server after subprocesses have been launched.
+    在子进程启动后配置全局状态、中间件，然后启动 HTTP 服务器。
     """
-    # Set global states
+    # Step 1: 保存全局状态到 _global_state，供各 API 路由处理函数使用
     set_global_state(
         _GlobalState(
             tokenizer_manager=tokenizer_manager,
@@ -2134,34 +2144,24 @@ def _setup_and_run_http_server(
         )
     )
 
-    # Store watchdog on tokenizer_manager (single source of truth for SIGQUIT handler)
+    # 保存 watchdog，用于在子进程异常退出时收到 SIGQUIT 信号
     if tokenizer_manager is not None:
         tokenizer_manager._subprocess_watchdog = subprocess_watchdog
 
     if server_args.enable_metrics:
         add_prometheus_track_response_middleware(app)
 
-    # Use Granian for HTTP/2 server
+    # ── 分支 A: HTTP/2 模式（使用 Granian 服务器）──
     if server_args.enable_http2:
-        # Reuse the multi-tokenizer shared memory mechanism to pass
-        # init args (port_args, server_args, scheduler_info) to
-        # Granian workers, which are independent processes.
+        # 将参数写入共享内存，Granian 的 worker 进程从中读取
         multi_tokenizer_args_shm = write_data_for_multi_tokenizer(
             port_args, server_args, scheduler_infos[0]
         )
         try:
-            if server_args.ssl_certfile:
-                logger.info(
-                    f"SSL enabled: certfile={server_args.ssl_certfile}, "
-                    f"keyfile={server_args.ssl_keyfile}"
-                )
             logger.info(
                 f"Starting Granian HTTP/2 server on "
                 f"{server_args.host}:{server_args.port}"
             )
-            # Propagate the main process PID via os.environ so Granian
-            # workers (forked or spawned) can locate the shared memory
-            # segment created above.
             envs.SGLANG_GRANIAN_PARENT_PID.set(os.getpid())
             _close_main_process_sockets()
             _run_granian_server(server_args)
@@ -2170,10 +2170,9 @@ def _setup_and_run_http_server(
                 multi_tokenizer_args_shm.unlink()
         return
 
-    # Pass additional arguments to the lifespan function.
-    # They will be used for additional initialization setups.
+    # ── 分支 B: 默认 HTTP/1.1 模式（Uvicorn）──
     if server_args.tokenizer_worker_num == 1:
-        # If it is single tokenizer mode, we can pass the arguments by attributes of the app object.
+        # 子分支 B1: 单 Tokenizer 进程（最常见的情况）
         app.is_single_tokenizer_mode = True
         app.server_args = server_args
         app.warmup_thread_kwargs = dict(
@@ -2182,13 +2181,7 @@ def _setup_and_run_http_server(
             execute_warmup_func=execute_warmup_func,
         )
 
-        # Add api key authorization
-        # This is only supported in single tokenizer mode.
-        #
-        # Backward compatibility:
-        # - api_key only: behavior matches legacy (all endpoints require api_key)
-        # - no keys: legacy had no restriction; ADMIN_FORCE endpoints must still be rejected when
-        #   admin_api_key is not configured.
+        # 如果配置了 API Key，添加认证中间件
         if (
             server_args.api_key
             or server_args.admin_api_key
@@ -2202,15 +2195,14 @@ def _setup_and_run_http_server(
                 admin_api_key=server_args.admin_api_key,
             )
     else:
-        # If it is multi-tokenizer mode, we need to write the arguments to shared memory
-        # for other worker processes to read.
+        # 子分支 B2: 多 Tokenizer 进程（高并发场景，较少见）
         app.is_single_tokenizer_mode = False
         multi_tokenizer_args_shm = write_data_for_multi_tokenizer(
             port_args, server_args, scheduler_infos[0]
         )
 
     try:
-        # Update logging configs
+        # Step 3: 启动 Uvicorn HTTP 服务器
         set_uvicorn_logging_configs(server_args)
 
         if server_args.ssl_certfile:
@@ -2219,10 +2211,10 @@ def _setup_and_run_http_server(
                 f"keyfile={server_args.ssl_keyfile}"
             )
 
-        # Listen for HTTP requests
         if server_args.tokenizer_worker_num == 1:
+            # 单 Tokenizer 进程 → 用 app 对象直接启动
             if server_args.enable_ssl_refresh:
-                # Use Config/Server API for access to the SSLContext.
+                # 支持 SSL 证书热刷新（证书快过期时自动续期）
                 config = uvicorn.Config(
                     app,
                     host=server_args.host,
@@ -2259,7 +2251,7 @@ def _setup_and_run_http_server(
 
                 asyncio.run(_run_with_ssl_refresh())
             else:
-                # Default case, one tokenizer process
+                # 最常用的启动方式：单进程 Uvicorn，用 uvloop 加速
                 uvicorn.run(
                     app,
                     host=server_args.host,
@@ -2274,7 +2266,7 @@ def _setup_and_run_http_server(
                     ssl_keyfile_password=server_args.ssl_keyfile_password,
                 )
         else:
-            # Multiple tokenizer and http processes
+            # 多 Tokenizer 进程模式：Uvicorn 自带的 workers 参数启动多进程
             from uvicorn.config import LOGGING_CONFIG
 
             LOGGING_CONFIG["loggers"]["sglang.srt.entrypoints.http_server"] = {
@@ -2323,20 +2315,20 @@ def launch_server(
 ):
     """
     Launch SRT (SGLang Runtime) Server.
+    启动 SGLang 推理服务器。
 
-    The SRT server consists of an HTTP server and an SRT engine.
+    架构说明：
+    - HTTP server: FastAPI 服务器，负责路由请求到引擎
+    - 引擎由三个组件组成：
+        1. TokenizerManager: 将文本分词后发给 Scheduler（运行在主进程）
+        2. Scheduler（子进程）: 接收 TokenizerManager 的请求，调度 batch，调用 GPU 推理，将输出 token 发给 DetokenizerManager
+        3. DetokenizerManager（子进程）: 将 token 反分词为文本，结果发回 TokenizerManager
 
-    - HTTP server: A FastAPI server that routes requests to the engine.
-    - The engine consists of three components:
-        1. TokenizerManager: Tokenizes the requests and sends them to the scheduler.
-        2. Scheduler (subprocess): Receives requests from the Tokenizer Manager, schedules batches, forwards them, and sends the output tokens to the Detokenizer Manager.
-        3. DetokenizerManager (subprocess): Detokenizes the output tokens and sends the result back to the Tokenizer Manager.
-
-    Note:
-    1. The HTTP server, Engine, and TokenizerManager all run in the main process.
-    2. Inter-process communication is done through IPC (each process uses a different port) via the ZMQ library.
+    注意：
+    1. HTTP server、Engine、TokenizerManager 都运行在主进程中
+    2. 进程间通信（IPC）通过 ZMQ 库实现，每个进程使用不同的端口
     """
-    # Launch subprocesses
+    # 启动三个子进程: Scheduler, DetokenizerManager, (以及各种辅助进程)
     (
         tokenizer_manager,
         template_manager,

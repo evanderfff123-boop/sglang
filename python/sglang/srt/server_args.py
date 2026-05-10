@@ -312,7 +312,7 @@ class ServerArgs:
     Please follow the existing style to group the new arguments into related groups or create new groups.
     """
 
-    # Model and tokenizer
+    # Model and tokenizer / 模型路径与分词器配置
     model_path: str
     tokenizer_path: Optional[str] = None
     tokenizer_mode: str = "auto"
@@ -328,7 +328,7 @@ class ServerArgs:
     revision: Optional[str] = None
     model_impl: str = "auto"
 
-    # HTTP server
+    # HTTP server / HTTP 服务器配置
     host: str = "127.0.0.1"
     port: int = 30000
     fastapi_root_path: str = ""
@@ -338,7 +338,7 @@ class ServerArgs:
     nccl_port: Optional[int] = None
     checkpoint_engine_wait_weights_before_ready: bool = False
 
-    # SSL/TLS
+    # SSL/TLS / HTTPS 证书配置
     ssl_keyfile: Optional[str] = None
     ssl_certfile: Optional[str] = None
     ssl_ca_certs: Optional[str] = None
@@ -346,7 +346,7 @@ class ServerArgs:
     enable_ssl_refresh: bool = False
     enable_http2: bool = False
 
-    # Quantization and data type
+    # Quantization and data type / 量化与精度配置
     dtype: str = "auto"
     quantization: Optional[str] = None
     quantization_param_path: Optional[str] = None
@@ -359,7 +359,7 @@ class ServerArgs:
     quantize_and_serve: bool = False
     rl_quant_profile: Optional[str] = None  # For flash_rl load format
 
-    # Memory and scheduling
+    # Memory and scheduling / 显存管理与调度策略
     mem_fraction_static: Optional[float] = None
     max_running_requests: Optional[int] = None
     max_queued_requests: Optional[int] = None
@@ -386,7 +386,7 @@ class ServerArgs:
     prefill_delayer_forward_passes_buckets: Optional[List[float]] = None
     prefill_delayer_wait_seconds_buckets: Optional[List[float]] = None
 
-    # Runtime options
+    # Runtime options / 运行时选项
     device: Optional[str] = None
     tp_size: int = 1
     pp_size: int = 1
@@ -411,7 +411,7 @@ class ServerArgs:
     use_ray: bool = False
     custom_sigquit_handler: Optional[Callable] = None
 
-    # Logging
+    # Logging / 日志配置
     log_level: str = "info"
     log_level_http: Optional[str] = None
     log_requests: bool = False
@@ -446,7 +446,7 @@ class ServerArgs:
     export_metrics_to_file: bool = False
     export_metrics_to_file_dir: Optional[str] = None
 
-    # API related
+    # API related / API 密钥与模型名称
     api_key: Optional[str] = None
     admin_api_key: Optional[str] = None
     served_model_name: Optional[str] = None
@@ -462,23 +462,23 @@ class ServerArgs:
     tool_server: Optional[str] = None
     sampling_defaults: str = "model"
 
-    # Data parallelism
+    # Data parallelism / 数据并行配置
     dp_size: int = 1
     load_balance_method: str = "auto"
 
     attn_cp_size: int = 1
     moe_dp_size: int = 1
 
-    # Multi-node distributed serving
+    # Multi-node distributed serving / 多机分布式部署
     dist_init_addr: Optional[str] = None
     nnodes: int = 1
     node_rank: int = 0
 
-    # Model override args in JSON
+    # Model override args in JSON / 以 JSON 覆盖模型默认配置
     json_model_override_args: str = "{}"
     preferred_sampling_params: Optional[str] = None
 
-    # LoRA
+    # LoRA / LoRA 微调适配器配置
     enable_lora: Optional[bool] = None
     enable_lora_overlap_loading: Optional[bool] = None
     max_lora_rank: Optional[int] = None
@@ -496,7 +496,7 @@ class ServerArgs:
     lora_strict_loading: bool = False
     lora_drain_wait_threshold: float = 0.0
 
-    # Kernel backend
+    # Kernel backend / 内核后端选择（attention/sampling/grammar）
     attention_backend: Optional[str] = None
     decode_attention_backend: Optional[str] = None
     prefill_attention_backend: Optional[str] = None
@@ -514,7 +514,7 @@ class ServerArgs:
     disable_flashinfer_autotune: bool = False
     mamba_backend: str = "triton"
 
-    # Speculative decoding
+    # Speculative decoding / 投机解码配置（用草稿模型加速）
     speculative_algorithm: Optional[str] = None
     speculative_draft_model_path: Optional[str] = None
     speculative_draft_model_revision: Optional[str] = None
@@ -547,7 +547,7 @@ class ServerArgs:
     speculative_ngram_external_corpus_max_tokens: int = 10000000
     enable_multi_layer_eagle: bool = False
 
-    # Expert parallelism
+    # Expert parallelism / 专家并行（MoE 模型专用）
     ep_size: int = 1
     moe_a2a_backend: Literal[
         "none", "deepep", "mooncake", "nixl", "mori", "ascend_fuseep", "flashinfer"
@@ -619,7 +619,7 @@ class ServerArgs:
     dllm_algorithm: Optional[str] = None
     dllm_algorithm_config: Optional[str] = None
 
-    # Offloading
+    # Offloading / CPU 卸载（显存不足时使用）
     cpu_offload_gb: int = 0
     offload_group_size: int = -1
     offload_num_in_group: int = 1
@@ -633,7 +633,7 @@ class ServerArgs:
     # placeholder token. See MIS_DELIMITER_TOKEN_ID for details.
     enable_mis: bool = False
 
-    # Optimization/debug options
+    # Optimization/debug options / 优化与调试选项
     disable_radix_cache: bool = False
     cuda_graph_max_bs: Optional[int] = None
     cuda_graph_bs: Optional[List[int]] = None
@@ -707,16 +707,16 @@ class ServerArgs:
     enable_precise_embedding_interpolation: bool = False
     enable_fused_moe_sum_all_reduce: bool = False
 
-    # Context parallelism
+    # Context parallelism / 上下文并行（长序列切分）
     enable_prefill_context_parallel: bool = False
     prefill_cp_mode: str = "in-seq-split"
 
-    # Dynamic batch tokenizer
+    # Dynamic batch tokenizer / 动态批处理分词器
     enable_dynamic_batch_tokenizer: bool = False
     dynamic_batch_tokenizer_batch_size: int = 32
     dynamic_batch_tokenizer_batch_timeout: float = 0.002
 
-    # Debug tensor dumps
+    # Debug tensor dumps / 调试：张量内容导出
     debug_tensor_dump_output_folder: Optional[str] = None
     # None means dump all layers.
     debug_tensor_dump_layers: Optional[List[int]] = None
@@ -724,7 +724,7 @@ class ServerArgs:
     debug_tensor_dump_input_file: Optional[str] = None
     debug_tensor_dump_inject: bool = False
 
-    # PD disaggregation: can be "null" (not disaggregated), "prefill" (prefill-only), or "decode" (decode-only)
+    # PD disaggregation / PD 分离部署模式: "null"(不分离), "prefill"(仅预填充), "decode"(仅解码)
     disaggregation_mode: Literal["null", "prefill", "decode"] = "null"
     disaggregation_transfer_backend: str = "mooncake"
     disaggregation_bootstrap_port: int = 8998
@@ -735,14 +735,14 @@ class ServerArgs:
     # FIXME: hack to reduce ITL when decode bs is small
     disaggregation_decode_polling_interval: int = 1
 
-    # Encode prefill disaggregation
+    # Encode prefill disaggregation / 编码器分离部署（多模态模型专用）
     encoder_only: bool = False
     language_only: bool = False
     encoder_transfer_backend: str = ENCODER_TRANSFER_BACKEND_CHOICES[0]
     encoder_urls: List[str] = dataclasses.field(default_factory=list)
     enable_adaptive_dispatch_to_encoder: bool = False
 
-    # For model weight update and weight loading
+    # For model weight update and weight loading / 模型权重加载与热更新
     custom_weight_loader: Optional[List[str]] = None
     weight_loader_disable_mmap: bool = False
     weight_loader_prefetch_checkpoints: bool = False
@@ -7276,30 +7276,28 @@ def get_global_server_args() -> ServerArgs:
 def prepare_server_args(argv: List[str]) -> ServerArgs:
     """
     Prepare the server arguments from the command line arguments.
+    从命令行参数解析并构造服务配置。
 
     Args:
-        args: The command line arguments. Typically, it should be `sys.argv[1:]`
-            to ensure compatibility with `parse_args` when no arguments are passed.
+        argv: 命令行参数列表，通常是 sys.argv[1:]。
 
     Returns:
-        The server arguments.
+        构造好的 ServerArgs 对象。
     """
     parser = argparse.ArgumentParser(prog="sglang serve")
     ServerArgs.add_cli_args(parser)
 
-    # Check for config file and merge arguments if present
+    # 如果传了 --config 配置文件，从配置文件中合并参数
     if "--config" in argv:
-        # Import here to avoid circular imports
         from sglang.srt.server_args_config_parser import ConfigArgumentMerger
 
-        # Extract boolean actions from the parser to handle them correctly
         config_merger = ConfigArgumentMerger(parser)
         argv = config_merger.merge_config_with_args(argv)
 
     raw_args = parser.parse_args(argv)
 
-    # Set up basic logging before ServerArgs.__post_init__ so that
-    # logger.info / logger.warning calls there are properly formatted.
+    # 在 ServerArgs.__post_init__ 之前初始化日志系统，
+    # 确保后续初始化过程中的日志输出格式正确
     logging.basicConfig(
         level=getattr(logging, raw_args.log_level.upper()),
         format="[%(asctime)s] %(message)s",
@@ -7316,11 +7314,13 @@ DP_ATTENTION_HANDSHAKE_PORT_DELTA = 13
 
 @dataclasses.dataclass
 class PortArgs:
-    # The ipc filename for tokenizer to receive inputs from detokenizer (zmq)
+    """进程间通信（IPC）的端口/地址配置。"""
+
+    # Tokenizer 从 Detokenizer 接收结果的 ZMQ 地址
     tokenizer_ipc_name: str
-    # The ipc filename for scheduler (rank 0) to receive inputs from tokenizer (zmq)
+    # Scheduler 从 Tokenizer 接收请求的 ZMQ 地址
     scheduler_input_ipc_name: str
-    # The ipc filename for detokenizer to receive inputs from scheduler (zmq)
+    # Detokenizer 从 Scheduler 接收输出的 ZMQ 地址
     detokenizer_ipc_name: str
 
     # The port for nccl initialization (torch.dist)
